@@ -1,4 +1,5 @@
 Test collaborating ability.
+<<<<<<< HEAD
 Adding a new line
 
 Newman added this.
