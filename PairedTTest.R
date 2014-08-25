@@ -6,7 +6,7 @@ NATSAP <- as.data.set(spss.system.file("NATSAP_PRN_DATABASE.sav"))
 NATSAP <- as.data.frame(NATSAP)
 
 ## Subset Data for OQ scores
-## NATSAP_OQ <- NATSAP[, grep("total.*OQ|OQ.*total", names(NATSAP), ignore.case = T)]
+NATSAP_OQ <- NATSAP[, grep("NatsapId|total.*OQ|OQ.*total", names(NATSAP), ignore.case = T)]
 
 ## Calculate diff variable
 whichDiff <- function(x1, x2){
@@ -20,7 +20,7 @@ YDis <- "YOUTHOQDischargeTotalScore"
 YPD6 <- "YOUTHOQPD6TotalScore"
 YPD12 <- "YOUTHOQPD12TotalScore"
 MAdd <- "MOTHEROQInitialYOQ20TotalScore"
-MDis <- "MOTHEROQDischarge20TotalScore"
+MDis <- "MOTHEROQDischargeOQ20TotalScore"
 MPD6 <- "MOTHEROQPD6YOQ20TotalScore"
 MPD12 <- "MOTHEROQPD12YOQ20TotalScore"
 FAdd <- "FATHEROQInitiaLOQ20TotalScore"
@@ -28,15 +28,52 @@ FDis <- "FATHEROQDischargeYOQ20TotalScore"
 FPD6 <- "FATHEROQPD6YOQ20TotalScore"
 FPD12 <- "FATHEROQPD12OQ20TotalScore"
 
+#Youth Specific Test---------------------------------
+
+NATSAP_Y <- NATSAP_OQ[, c("NatsapId", YAdd, YDis)]
+NATSAP_Y <- NATSAP_Y[complete.cases(NATSAP_Y),]
+
 diff <- whichDiff(YAdd, YDis)
-diff <- diff[,1]
 diff <- diff[!is.na(diff)]
-N <- length(diff)
+nSubj <- length(diff)
+nProg <- length(unique(NATSAP_Y$NatsapId))
+Prog <- NATSAP_Y$NatsapId
+
+#Put data in a list for stan
+
+dataList <- list( 
+  nProg = nProg ,
+  nSubj = nSubj ,
+  Prog = Prog,
+  diff = diff)
+
+#fitData <- c(dataList)
+fit <- stan(file = "YouthOQ_AD.stan", data = dataList)
+
+#---------------------------------------------------------------------
+#Examine the Results
+samplesSet = extract(fit, pars =  c("mu"))
+print(fit, digits_summary = 3)
+traceplot(fit, pars = c("mu"))
+
+# Extract parameter values and save them.
+
+mu = t(samplesSet$mu)
+
+chainLength = NCOL(mu)
+
+# Histograms of mu differences:
+windows(10,10)
+#layout( matrix(1:1,nrow=1) ) #This was originally matrix(1:3)
+source("plotPost.R")
+plotPost( mu , xlab=expression(mu) , main="" ,
+          breaks=20)
+# plotPost( mu[3,]-mu[4,] , xlab=expression(mu[3]-mu[4]) , main="" ,
+#           breaks=20 , compVal=0 )
+# plotPost( (mu[1,]+mu[2,])/2 - (mu[3,]+mu[4,])/2 ,
+#           xlab=expression( (mu[1]+mu[2])/2 - (mu[3]+mu[4])/2 ) ,
+#           main="" , breaks=20 , compVal=0 )
+dev.copy2eps(file=paste(fileNameRoot,"MuDiffs.eps",sep=""))
 
 ## Run T-Test
 print(t.test(diff))
-
-fitData <- c("N","diff")
-fit <- stan(file = "YouthOQ_AD.stan", data = fitData)
-
-
