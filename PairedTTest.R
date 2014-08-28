@@ -39,12 +39,18 @@ nSubj <- length(diff)
 nProg <- length(unique(NATSAP_Y$NatsapId))
 Prog <- NATSAP_Y$NatsapId
 
+#ProgId is a vector that replaces Program IDs with new IDs numbered 1-30
+#So it will work in the loop in the sampler
+ProgId <- as.factor(Prog)
+levels(ProgId) <- 1:length(levels(ProgId))
+ProgId <- as.numeric(ProgId)
+
 #Put data in a list for stan
 
 dataList <- list( 
   nProg = nProg ,
   nSubj = nSubj ,
-  Prog = Prog,
+  ProgId = ProgId,
   diff = diff)
 
 #fitData <- c(dataList)
@@ -63,16 +69,17 @@ mu = t(samplesSet$mu)
 chainLength = NCOL(mu)
 
 # Histograms of mu differences:
-windows(10,10)
-#layout( matrix(1:1,nrow=1) ) #This was originally matrix(1:3)
+windows(19,10)
+layout( matrix(1:10,nrow=2) ) #This was originally matrix(1:3)
 source("plotPost.R")
-plotPost( mu , xlab=expression(mu) , main="" ,
+for(i in 1:10){
+plotPost( mu[i,] , xlab=expression(mu) , main="" ,
           breaks=20)
-# plotPost( mu[3,]-mu[4,] , xlab=expression(mu[3]-mu[4]) , main="" ,
-#           breaks=20 , compVal=0 )
-# plotPost( (mu[1,]+mu[2,])/2 - (mu[3,]+mu[4,])/2 ,
-#           xlab=expression( (mu[1]+mu[2])/2 - (mu[3]+mu[4])/2 ) ,
-#           main="" , breaks=20 , compVal=0 )
+}
+# plotPost( mu[i,] , xlab=expression(mu) , main="" ,
+#           breaks=20 )
+# plotPost( (mu[i,], xlab=expression(mu) , main="" , 
+#           breaks=20 )
 dev.copy2eps(file=paste(fileNameRoot,"MuDiffs.eps",sep=""))
 
 ## Run T-Test
