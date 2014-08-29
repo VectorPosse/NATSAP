@@ -18,9 +18,6 @@ model {
     mu ~ normal(muG, sigmaG);
   for(subjIdx in 1:nSubj)
   {
-    // ERROR: The Prog vector returns the id of the program
-    // but the vector mu[] can only handle inputs from 1-30
-    // so it fails when Prog[subjIdx] = 110, for example
       diff[subjIdx] ~ normal( mu[ProgId[subjIdx]] , sigma );
   }
 }
