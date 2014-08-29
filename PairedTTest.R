@@ -76,10 +76,20 @@ for(i in 1:10){
 plotPost( mu[i,] , xlab=expression(mu) , main="" ,
           breaks=20)
 }
-# plotPost( mu[i,] , xlab=expression(mu) , main="" ,
-#           breaks=20 )
-# plotPost( (mu[i,], xlab=expression(mu) , main="" , 
-#           breaks=20 )
+windows(19,10)
+layout( matrix(1:10,nrow=2) ) #This was originally matrix(1:3)
+source("plotPost.R")
+for(i in 11:20){
+  plotPost( mu[i,] , xlab=expression(mu) , main="" ,
+            breaks=20)
+}
+windows(19,10)
+layout( matrix(1:10,nrow=2) ) #This was originally matrix(1:3)
+source("plotPost.R")
+for(i in 21:30){
+  plotPost( mu[i,] , xlab=expression(mu) , main="" ,
+            breaks=20)
+}
 dev.copy2eps(file=paste(fileNameRoot,"MuDiffs.eps",sep=""))
 
 ## Run T-Test
