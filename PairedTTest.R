@@ -55,6 +55,7 @@ mu = t(samplesSet$mu)
 
 chainLength = NCOL(mu)
 
+pdf("ProgDiffs.pdf")
 # Histograms of mu differences:
 pdf("TTestDiff.pdf")
 windows(10,10)
