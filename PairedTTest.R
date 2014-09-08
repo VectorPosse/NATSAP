@@ -58,7 +58,9 @@ mu = t(samplesSet$mu)
 chainLength = NCOL(mu)
 
 # Histograms of mu differences:
+source("plotPost.R")
 pdf("TTestDiff.pdf")
+
 layout( matrix(1:1,nrow=1) ) #This was originally matrix(1:3)
 plotPost( mu , xlab=expression(mu[diff]) , main="" ,
           breaks=20)

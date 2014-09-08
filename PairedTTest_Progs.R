@@ -69,30 +69,48 @@ mu = t(samplesSet$mu)
 chainLength = NCOL(mu)
 
 # Histograms of mu differences:
-pdf("ProgDiffs.pdf")
-windows(19,10)
-layout( matrix(1:10,nrow=2) )
 source("plotPost.R")
-for(i in 1:10){
+pdf("ProgDiffs.pdf")
+layout( matrix(1:9, nrow=3, byrow = TRUE) )
+for(i in 1:9){
 plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
           breaks=20)
 }
+layout( matrix(1:9, nrow=3, byrow = TRUE) )
+for(i in 10:18){
+  plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
+            breaks=20)
+}
+layout( matrix(1:9, nrow=3, byrow = TRUE) )
+for(i in 19:27){
+  plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
+            breaks=20)
+}
+layout( matrix(1:9, nrow=3, byrow = TRUE) )
+for(i in 28:30){
+  plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
+            breaks=20)
+}
+graphics.off()
+
 windows(19,10)
-layout( matrix(1:10,nrow=2) )
-source("plotPost.R")
+layout( matrix(1:10,nrow=2, byrow = TRUE) )
+for(i in 1:10){
+  plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
+            breaks=20)
+}
+windows(19,10)
+layout( matrix(1:10,nrow=2, byrow = TRUE) )
 for(i in 11:20){
   plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
             breaks=20)
 }
 windows(19,10)
-layout( matrix(1:10,nrow=2) )
-source("plotPost.R")
+layout( matrix(1:10,nrow=2, byrow = TRUE) )
 for(i in 21:30){
   plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
             breaks=20)
 }
-dev.off()
-#dev.copy2eps(file=paste(fileNameRoot,"MuDiffs.eps",sep=""))
 
 ## Run T-Test
 print(t.test(diff))
