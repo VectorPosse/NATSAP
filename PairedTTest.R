@@ -1,6 +1,8 @@
 library(rstan)
 library(memisc)
 
+source("plotPost.R")
+
 ## Import Data
 NATSAP <- as.data.set(spss.system.file("NATSAP_PRN_DATABASE.sav"))
 NATSAP <- as.data.frame(NATSAP)
@@ -55,16 +57,12 @@ mu = t(samplesSet$mu)
 
 chainLength = NCOL(mu)
 
-pdf("ProgDiffs.pdf")
 # Histograms of mu differences:
 pdf("TTestDiff.pdf")
-windows(10,10)
 layout( matrix(1:1,nrow=1) ) #This was originally matrix(1:3)
-source("plotPost.R")
 plotPost( mu , xlab=expression(mu[diff]) , main="" ,
           breaks=20)
-dev.off()
-#dev.copy2eps(file=paste(fileNameRoot,"MuDiffs.eps",sep=""))
+graphics.off()
 
 ## Run T-Test
 print(t.test(diff))
