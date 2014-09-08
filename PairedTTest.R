@@ -30,27 +30,14 @@ FPD12 <- "FATHEROQPD12OQ20TotalScore"
 
 #Youth Specific Test---------------------------------
 
-NATSAP_Y <- NATSAP_OQ[, c("NatsapId", YAdd, YDis)]
-NATSAP_Y <- NATSAP_Y[complete.cases(NATSAP_Y),]
-
 diff <- whichDiff(YAdd, YDis)
 diff <- diff[!is.na(diff)]
 nSubj <- length(diff)
-nProg <- length(unique(NATSAP_Y$NatsapId))
-Prog <- NATSAP_Y$NatsapId
-
-#ProgId is a vector that replaces Program IDs with new IDs numbered 1-30
-#So it will work in the loop in the sampler
-ProgId <- as.factor(Prog)
-levels(ProgId) <- 1:length(levels(ProgId))
-ProgId <- as.numeric(ProgId)
 
 #Put data in a list for stan
 
 dataList <- list( 
-  nProg = nProg ,
   nSubj = nSubj ,
-  ProgId = ProgId,
   diff = diff)
 
 #fitData <- c(dataList)
@@ -69,27 +56,12 @@ mu = t(samplesSet$mu)
 chainLength = NCOL(mu)
 
 # Histograms of mu differences:
-windows(19,10)
-layout( matrix(1:10,nrow=2) ) #This was originally matrix(1:3)
+windows(10,10)
+layout( matrix(1:1,nrow=1) ) #This was originally matrix(1:3)
 source("plotPost.R")
-for(i in 1:10){
-plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
+plotPost( mu , xlab=expression(mu[diff]) , main="" ,
           breaks=20)
-}
-windows(19,10)
-layout( matrix(1:10,nrow=2) ) #This was originally matrix(1:3)
-source("plotPost.R")
-for(i in 11:20){
-  plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
-            breaks=20)
-}
-windows(19,10)
-layout( matrix(1:10,nrow=2) ) #This was originally matrix(1:3)
-source("plotPost.R")
-for(i in 21:30){
-  plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
-            breaks=20)
-}
+
 #dev.copy2eps(file=paste(fileNameRoot,"MuDiffs.eps",sep=""))
 
 ## Run T-Test

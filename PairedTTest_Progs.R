@@ -54,7 +54,7 @@ dataList <- list(
   diff = diff)
 
 #fitData <- c(dataList)
-fit <- stan(file = "YouthOQ_AD.stan", data = dataList)
+fit <- stan(file = "YouthOQ_AD_H.stan", data = dataList)
 
 #---------------------------------------------------------------------
 #Examine the Results
@@ -70,21 +70,21 @@ chainLength = NCOL(mu)
 
 # Histograms of mu differences:
 windows(19,10)
-layout( matrix(1:10,nrow=2) ) #This was originally matrix(1:3)
+layout( matrix(1:10,nrow=2) )
 source("plotPost.R")
 for(i in 1:10){
 plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
           breaks=20)
 }
 windows(19,10)
-layout( matrix(1:10,nrow=2) ) #This was originally matrix(1:3)
+layout( matrix(1:10,nrow=2) )
 source("plotPost.R")
 for(i in 11:20){
   plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
             breaks=20)
 }
 windows(19,10)
-layout( matrix(1:10,nrow=2) ) #This was originally matrix(1:3)
+layout( matrix(1:10,nrow=2) )
 source("plotPost.R")
 for(i in 21:30){
   plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
