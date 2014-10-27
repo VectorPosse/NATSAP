@@ -71,19 +71,22 @@ chainLength = NCOL(mu)
 # Histograms of mu differences:
 source("plotPost.R")
 pdf("GenderDiffs.pdf")
-layout( matrix(1:2, nrow=1, byrow = TRUE) )
+layout( matrix(1:2, nrow=2, byrow = TRUE) )
 for(i in 1:2){
   plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
-            breaks=20)
+            breaks=20, xlim = range(20:45))
 }
+
+source("plotPost.R")
+pdf("GenderDiff.pdf")
+plotPost( mu[2,]-mu[1,] , xlab=expression(mu[female]-mu[male]) , main="" ,
+            breaks=20, compVal = 0)
 graphics.off()
 
-windows(19,10)
-layout( matrix(1:2,nrow=1, byrow = TRUE) )
-for(i in 1:2){
-  plotPost( mu[i,] , xlab=paste("mu", i, sep="") , main="" ,
-            breaks=20)
-}
+
+sampleSet <- as.data.frame(samplesSet)
+#ggplot(sampleSet, aes(mu.1,mu.2)) +
+#  geom_histogram() + facet_grid(mu.1 ~ mu.2)
 
 ## Run T-Test
-print(t.test(diff))
+print(t.test(diff ~ GenderNumeric, data = NATSAP_G))

@@ -8,8 +8,10 @@ data {
 transformed data {
   real muG;
   real<lower=0> sigmaG;
+  int<lower=0> df;
   muG <- 0;
   sigmaG <- 1000;
+  df <- 501;
 }
 parameters {
   vector[nGender] mu; 
@@ -19,6 +21,6 @@ model {
   mu ~ normal(muG, sigmaG);
   for(subjIdx in 1:nSubj)
   {
-    diff[subjIdx] ~ normal( mu[GenderId[subjIdx]] , sigma );
+    diff[subjIdx] ~ student_t(df, mu[GenderId[subjIdx]] , sigma );
   }
 }
