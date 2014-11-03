@@ -1,80 +1,121 @@
 ---
-title: "T-tests"
+title: "NATSAP: T-test for Youth OQ Admission vs. Discharge"
 output: html_document
 ---
 
-Load libraries: `rstan` for using STAN for Bayesian sampling and `memisc` for importing an SPSS file.
+## Preliminaries
+
+Load libraries: `rstan` for using STAN for Bayesian sampling and `foreign` for importing an SPSS file.
 
 ```{r, message=FALSE}
 library(rstan)
-library(memisc)
+library(foreign)
 ```
 
-The `plotpost` function all
+The `plotpost` function gives us pretty graphics for Bayesian inference. We should look into using `mcmcplots` or `ggmcmc` instead.
+
+```{r}
 source("plotPost.R")
+```
 
 ## Import Data
-NATSAP <- as.data.set(spss.system.file("NATSAP_PRN_DATABASE.sav"))
-NATSAP <- as.data.frame(NATSAP)
 
-## Subset Data for OQ scores
-NATSAP_OQ <- NATSAP[, grep("NatsapId|total.*OQ|OQ.*total", names(NATSAP), ignore.case = T)]
+The `memisc` package stopped working for me, but `foreign` does a nice job withthe exception of throwing a few warnings that I'm not sure about.
 
-## Calculate diff variable
+```{r}
+NATSAP <- read.spss("NATSAP_PRN_DATABASE.sav", to.data.frame = TRUE)
+```
+
+
+## Prepare data
+
+The `whichDiff` function is a simple way to grab the difference of any two variables.
+
+```{r}
 whichDiff <- function(x1, x2){
   NATSAP[x1] - NATSAP[x2]
 }
+```
 
+For convenience, we use abbreviated variable names.
 
-## Decide which variables to use for the Paired T-Test
+```{r}
 YAdd <- "YOUTHOQAdmissionTotalScore"
 YDis <- "YOUTHOQDischargeTotalScore"
-YPD6 <- "YOUTHOQPD6TotalScore"
-YPD12 <- "YOUTHOQPD12TotalScore"
-MAdd <- "MOTHEROQInitialYOQ20TotalScore"
-MDis <- "MOTHEROQDischargeOQ20TotalScore"
-MPD6 <- "MOTHEROQPD6YOQ20TotalScore"
-MPD12 <- "MOTHEROQPD12YOQ20TotalScore"
-FAdd <- "FATHEROQInitiaLOQ20TotalScore"
-FDis <- "FATHEROQDischargeYOQ20TotalScore"
-FPD6 <- "FATHEROQPD6YOQ20TotalScore"
-FPD12 <- "FATHEROQPD12OQ20TotalScore"
+```
 
-#Youth Specific Test---------------------------------
+For this test, we're interested in the difference between youth OQ scores at admission and discharge.
 
+
+```{r}
 diff <- whichDiff(YAdd, YDis)
 diff <- diff[!is.na(diff)]
 nSubj <- length(diff)
+```
 
-#Put data in a list for stan
+## Stan
 
+Stan requires data to be passed as a list.
+
+```{r}
 dataList <- list( 
   nSubj = nSubj ,
   diff = diff)
+```
 
-#fitData <- c(dataList)
-fit <- stan(file = "YouthOQ_AD.stan", data = dataList)
+Here we define the Stan model code.
 
-#---------------------------------------------------------------------
-#Examine the Results
+```{r}
+model = "
+data {
+    int<lower=0> nSubj; //number of subjects
+    real diff[nSubj];   //treatment effect
+}
+parameters {
+    real mu; 
+    real<lower=0> sigma;
+}
+model {
+    diff ~ normal(mu, sigma);
+}
+"
+```
+
+Fit the Stan model.
+
+```{r, cache=TRUE}
+fit <- stan(model_code = model, data = dataList)
+```
+
+Extract the samples, view the summary statistics for the parameters, and check the convergence and mixing of the chains.
+
+```{r}
 samplesSet = extract(fit, pars =  c("mu"))
 print(fit, digits_summary = 3)
 traceplot(fit, pars = c("mu"))
+```
 
-# Extract parameter values and save them.
+The parameter of interest is `mu`.
 
+```{r}
 mu = t(samplesSet$mu)
-
 chainLength = NCOL(mu)
+```
 
-# Histograms of mu differences:
+## Inference
+
+Here we produce a histogram and credible interval for `mu`.
+
+```{r}
 source("plotPost.R")
-pdf("TTestDiff.pdf")
-
-layout( matrix(1:1,nrow=1) ) #This was originally matrix(1:3)
 plotPost( mu , xlab=expression(mu[diff]) , main="" ,
           breaks=20)
-graphics.off()
+```
 
-## Run T-Test
+## T-test
+
+We run a t-test to compare our Bayesian inference to the classical test.
+
+```{r}
 print(t.test(diff))
+```
