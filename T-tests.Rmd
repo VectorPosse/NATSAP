@@ -1,119 +1,80 @@
 ---
-title: "Youth OQ T-test"
+title: "T-tests"
 output: html_document
 ---
 
-Here we run a simple t-test on the difference between Youth OQ scores at admission and discharge. First we run basic (non-hierarchical) Bayes, and then follow up with a classical t-test. Both methods yield nearly identical results.
-
-## Preliminaries
-
-Load libraries: `rstan` for using STAN for Bayesian sampling and `foreign` for importing an SPSS file.
+Load libraries: `rstan` for using STAN for Bayesian sampling and `memisc` for importing an SPSS file.
 
 ```{r, message=FALSE}
 library(rstan)
-library(foreign)
+library(memisc)
 ```
 
-The `plotpost` function from Kruschke allows us to make pretty graphs. We should look into using `ggplot2`, maybe even through the `ggmcmc` package or something similar.
-
-```{r}
+The `plotpost` function all
 source("plotPost.R")
-```
 
-## Importing and cleaning data
-
-Import the data and subset for OQ scores.
-
-```{r cache=TRUE}
-NATSAP <- read.spss("NewNATSAP.sav")
+## Import Data
+NATSAP <- as.data.set(spss.system.file("NATSAP_PRN_DATABASE.sav"))
 NATSAP <- as.data.frame(NATSAP)
-```
 
-(The `foreign` package seems to work more smoothly than `memisc`, but it's generating a few weird errors I should look into.)
+## Subset Data for OQ scores
+NATSAP_OQ <- NATSAP[, grep("NatsapId|total.*OQ|OQ.*total", names(NATSAP), ignore.case = T)]
 
-## Extracting the data of interest
-
-The `whichDiff` function will produce vectors of differences between two columns.
-
-```{r}
+## Calculate diff variable
 whichDiff <- function(x1, x2){
   NATSAP[x1] - NATSAP[x2]
 }
-```
 
-Get the variables we want to compare.
 
-```{r}
-YAdd <- "AdmissionTotalScore"
-YDis <- "DischargeTotalScore"
+## Decide which variables to use for the Paired T-Test
+YAdd <- "YOUTHOQAdmissionTotalScore"
+YDis <- "YOUTHOQDischargeTotalScore"
+YPD6 <- "YOUTHOQPD6TotalScore"
+YPD12 <- "YOUTHOQPD12TotalScore"
+MAdd <- "MOTHEROQInitialYOQ20TotalScore"
+MDis <- "MOTHEROQDischargeOQ20TotalScore"
+MPD6 <- "MOTHEROQPD6YOQ20TotalScore"
+MPD12 <- "MOTHEROQPD12YOQ20TotalScore"
+FAdd <- "FATHEROQInitiaLOQ20TotalScore"
+FDis <- "FATHEROQDischargeYOQ20TotalScore"
+FPD6 <- "FATHEROQPD6YOQ20TotalScore"
+FPD12 <- "FATHEROQPD12OQ20TotalScore"
+
+#Youth Specific Test---------------------------------
+
 diff <- whichDiff(YAdd, YDis)
 diff <- diff[!is.na(diff)]
 nSubj <- length(diff)
-```
 
-## The STAN model
+#Put data in a list for stan
 
-We specify the model in STAN code.
-
-```{r}
-stan_model <- "
-//This is the stan model for non-hierarchical t-test
-data {
-    int<lower=0> nSubj; //number of subjects
-    real diff[nSubj];   //treatment effect
-}
-parameters {
-    real mu; 
-    real<lower=0> sigma;
-}
-model {
-    diff ~ normal(mu, sigma);
-}"
-```
-
-STAN requires us to pass all the data in a list.
-
-```{r}
 dataList <- list( 
   nSubj = nSubj ,
   diff = diff)
-```
 
-Now fit the model in STAN.
+#fitData <- c(dataList)
+fit <- stan(file = "YouthOQ_AD.stan", data = dataList)
 
-```{r, cache=TRUE, message=FALSE, warning=FALSE}
-fit <- stan(model_code = stan_model, data = dataList, verbose = FALSE)
-```
-
-[No amount of setting flags equal to FALSE seems to get rid of all this annoying STAN output.]
-
-## Conclusions
-
-We extract the samples and examine them for convergence.
-
-```{r}
+#---------------------------------------------------------------------
+#Examine the Results
 samplesSet = extract(fit, pars =  c("mu"))
 print(fit, digits_summary = 3)
 traceplot(fit, pars = c("mu"))
-```
 
-Extract the parameters we want to analyze.
+# Extract parameter values and save them.
 
-```{r}
 mu = t(samplesSet$mu)
+
 chainLength = NCOL(mu)
-```
 
-Now we create a histogram with HDI of the mean difference between youth intake and youth discharge scores.
+# Histograms of mu differences:
+source("plotPost.R")
+pdf("TTestDiff.pdf")
 
-```{r}
 layout( matrix(1:1,nrow=1) ) #This was originally matrix(1:3)
 plotPost( mu , xlab=expression(mu[diff]) , main="" ,
           breaks=20)
-```
+graphics.off()
 
-By way of contrast, here is a simple t-test to compare the Bayesian version to the classical version.
-
-```{r}
+## Run T-Test
 print(t.test(diff))
-```
