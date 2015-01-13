@@ -33,10 +33,12 @@ model {
 
   for (group in 1:nGroup)
     beta[group] ~ multi_normal((GPred[group]*gamma)', Sigma_beta);
+
   {
   vector[nSubj] IPred_beta_groupId;
   for(subj in 1:nSubj)
     IPred_beta_groupId[subj] <- IPred[subj]*beta[groupId[subj]];
+
   diff ~ normal(IPred_beta_groupId, sigma);
   }
 }
