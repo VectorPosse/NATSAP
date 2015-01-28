@@ -1,0 +1,199 @@
+---
+title: "Building up models"
+author: "Sean Raleigh"
+date: "Tuesday, January 27, 2015"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+## Introduction
+
+In this document, we build up models for the NATSAP data, starting from very simple models and gradually getting more and more complex.
+
+## Read in data
+
+Code to read and clean the data.
+
+```{r, comment=FALSE, message=FALSE, warning=FALSE}
+library(lme4)
+library(rstan)
+library(dplyr)
+library(ggplot2)
+
+## Import Data
+natsap <- read.csv("NewNATSAP.csv")
+dose <- read.csv("NATSAPDoseData.csv")
+
+## Get rid of program with no NatsapID
+dose <- dose[!is.na(dose$NatsapId),]
+
+## Select only wanted variables and create diff
+natsap_tidy <- natsap %>%
+    select(ID = NatsapId,
+           sex = GenderNumeric, 
+           admission_OQ = AdmissionTotalScore,
+           discharge_OQ = DischargeTotalScore) %>%
+    mutate(diff = admission_OQ - discharge_OQ)
+
+natsap_tidy <- natsap_tidy[complete.cases(natsap_tidy),]
+
+dose_tidy <- dose %>%
+    select(rtc_vs_OBH = RTCvsOBH,
+           ID = NatsapId,
+           minutes_ind_therapy = Mode.minutes.of.Inidividual.Therapy,
+           minutes_group_therapy = Mode.minutes.of.Group.Therapy)
+
+## Creates new program IDs incrementing from 1 for loops in Stan
+## lookup is the intersection of ID from dose_tidy and natsap_tidy
+natsap_tidy_ID <- select(natsap_tidy, ID)
+dose_tidy_ID <- select(dose_tidy, ID)
+lookup <- semi_join(dose_tidy_ID, natsap_tidy_ID)
+lookup <- cbind(lookup, new_ID = 1:length(lookup$ID))
+
+## Selects only the cases in the dataframes that have IDs in Lookup
+## and adds a column including the new indices for the NatsapIds
+natsap_tidy <- natsap_tidy %>%
+    inner_join(lookup, by = "ID") %>%
+    arrange(new_ID)
+dose_tidy <- dose_tidy %>%
+    inner_join(lookup, by = "ID") %>%
+    arrange(new_ID)
+
+## Defines Variables to be passed to Stan
+## IPred and GPred have a column of 1's representing the constant term
+n_subj <- nrow(natsap_tidy)
+n_prog <- nrow(dose_tidy)
+sex <- select(natsap_tidy, sex)
+ind_pred <- cbind(rep(1, n_subj), sex)
+minutes_ind_therapy <- select(dose_tidy, minutes_ind_therapy)
+minutes_group_therapy <- select(dose_tidy, minutes_group_therapy)
+group_pred <- cbind(rep(1, n_prog), minutes_ind_therapy, minutes_group_therapy)
+diff <- natsap_tidy$diff
+ID = select(natsap_tidy, ID)
+
+
+## Put data in a list for Stan
+data_list <- list(n_subj = n_subj,
+                  n_prog = n_prog,
+                  n_ind_pred = ncol(ind_pred),
+                  n_group_pred = ncol(group_pred),
+                  diff = diff,
+                  ID = ID,
+                  ind_pred = ind_pred,
+                  group_pred = group_pred)
+
+```
+
+## Simple linear models
+
+We need IDs and sex to be factor variables.
+
+```{r}
+natsap_tidy <- natsap_tidy %>%
+    mutate(ID = as.factor(ID),
+           new_ID = as.factor(new_ID),
+           sex = as.factor(sex))
+```
+
+Let's look only at `diff` by `sex`. This is what Gelman and Hill call "complete pooling".
+
+```{r}
+fit_pooled <- lm(diff ~ sex - 1, data = natsap_tidy)
+summary(fit_pooled)
+```
+
+Contrast this with no pooling.
+
+```{r}
+fit_unpooled <- lm(diff ~ sex + new_ID - 1, data = natsap_tidy)
+summary(fit_unpooled)
+```
+
+We use `lmer` from the `lme4` package to create a varying intercept model.
+
+```{r}
+fit_vint <- lmer(diff ~ sex + (1 | new_ID), data = natsap_tidy)
+summary(fit_vint)
+coef(fit_vint)
+fixef(fit_vint)
+ranef(fit_vint)
+```
+
+## Hierarchical models
+
+Now we add a group-level predictor.
+```{r}
+## We need to grab the minutes of individual and group therapy for each individual
+minutes_ind_therapy_full <- minutes_ind_therapy[natsap_tidy$new_ID,]
+minutes_group_therapy_full <- minutes_group_therapy[natsap_tidy$new_ID,]
+
+## The model for individual therapy
+fit_hier_vint_ind <- lmer(diff ~ sex + minutes_ind_therapy_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_ind)
+coef(fit_hier_vint_ind)
+fixef(fit_hier_vint_ind)
+ranef(fit_hier_vint_ind)
+
+## The model for group therapy
+fit_hier_vint_group <- lmer(diff ~ sex + minutes_group_therapy_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_group)
+coef(fit_hier_vint_group)
+fixef(fit_hier_vint_group)
+ranef(fit_hier_vint_group)
+```
+
+Let's try to plot something.
+```{r}
+## Wihtout having to load the arm package, we can still use the handy
+## functions se.fixef and se.ranef
+se.fixef <- function (object) 
+{
+    fcoef.name <- names(fixef(object))
+    corF <- vcov(object)@factors$correlation
+    ses <- corF@sd
+    names(ses) <- fcoef.name
+    return(ses)
+}
+
+se.ranef <- function (object) 
+{
+    se.bygroup <- ranef(object, condVar = TRUE)
+    n.groupings <- length(se.bygroup)
+    for (m in 1:n.groupings) {
+        vars.m <- attr(se.bygroup[[m]], "postVar")
+        K <- dim(vars.m)[1]
+        J <- dim(vars.m)[3]
+        names.full <- dimnames(se.bygroup[[m]])
+        se.bygroup[[m]] <- array(NA, c(J, K))
+        for (j in 1:J) {
+            se.bygroup[[m]][j, ] <- sqrt(diag(as.matrix(vars.m[, 
+                , j])))
+        }
+        dimnames(se.bygroup[[m]]) <- list(names.full[[1]], names.full[[2]])
+    }
+    return(se.bygroup)
+}
+
+## Extract coefficients for minutes of individual therapy
+int_ind <-coef(fit_hier_vint_ind)$new_ID[,1]
+se_int_ind <- se.ranef(fit_hier_vint_ind)$new_ID[,1]
+int_by_ind <- 
+    data.frame(dose_tidy$new_ID, minutes_ind_therapy,int_ind, se_int_ind)
+limits_ind <- aes(ymax = int_ind + se_int_ind, ymin = int_ind - se_int_ind)
+ggplot(int_by_ind, aes(x = minutes_ind_therapy, y = int_ind)) +
+    geom_pointrange(limits_ind, position = position_jitter(width = 1))
+
+## Extract coefficients for minutes of group therapy
+int_group <-coef(fit_hier_vint_group)$new_ID[,1]
+se_int_group <- se.ranef(fit_hier_vint_group)$new_ID[,1]
+int_by_group <- 
+    data.frame(dose_tidy$new_ID, minutes_group_therapy,int_group, se_int_group)
+limits_group <- aes(ymax = int_group + se_int_group, ymin = int_group - se_int_group)
+ggplot(int_by_group, aes(x = minutes_group_therapy, y = int_group)) +
+    geom_pointrange(limits_group, position = position_jitter(width = 2))
+```
