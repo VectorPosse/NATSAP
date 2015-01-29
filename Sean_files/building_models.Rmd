@@ -21,6 +21,7 @@ Code to read and clean the data.
 library(lme4)
 library(rstan)
 library(dplyr)
+library(reshape2)
 library(ggplot2)
 
 ## Import Data
@@ -40,8 +41,10 @@ natsap_tidy <- natsap %>%
 
 natsap_tidy <- natsap_tidy[complete.cases(natsap_tidy),]
 
+
+    
 dose_tidy <- dose %>%
-    select(rtc_vs_OBH = RTCvsOBH,
+    select(rtc_vs_obh = RTCvsOBH,
            ID = NatsapId,
            minutes_ind_therapy = Mode.minutes.of.Inidividual.Therapy,
            minutes_group_therapy = Mode.minutes.of.Group.Therapy)
@@ -62,6 +65,13 @@ dose_tidy <- dose_tidy %>%
     inner_join(lookup, by = "ID") %>%
     arrange(new_ID)
 
+## Add sample sizes for each program
+n_by_program <- natsap_tidy %>%
+    group_by(new_ID) %>%
+    summarize(n = n())
+
+dose_tidy <- cbind(dose_tidy, n = n_by_program$n)
+
 ## Defines Variables to be passed to Stan
 ## IPred and GPred have a column of 1's representing the constant term
 n_subj <- nrow(natsap_tidy)
@@ -70,6 +80,7 @@ sex <- select(natsap_tidy, sex)
 ind_pred <- cbind(rep(1, n_subj), sex)
 minutes_ind_therapy <- select(dose_tidy, minutes_ind_therapy)
 minutes_group_therapy <- select(dose_tidy, minutes_group_therapy)
+rtc_vs_obh <- select(dose_tidy, rtc_vs_obh)
 group_pred <- cbind(rep(1, n_prog), minutes_ind_therapy, minutes_group_therapy)
 diff <- natsap_tidy$diff
 ID = select(natsap_tidy, ID)
@@ -85,6 +96,35 @@ data_list <- list(n_subj = n_subj,
                   ind_pred = ind_pred,
                   group_pred = group_pred)
 
+## Wihtout having to load the arm package, we can still use the handy
+## functions se.fixef and se.ranef
+se.fixef <- function (object) 
+{
+    fcoef.name <- names(fixef(object))
+    corF <- vcov(object)@factors$correlation
+    ses <- corF@sd
+    names(ses) <- fcoef.name
+    return(ses)
+}
+
+se.ranef <- function (object) 
+{
+    se.bygroup <- ranef(object, condVar = TRUE)
+    n.groupings <- length(se.bygroup)
+    for (m in 1:n.groupings) {
+        vars.m <- attr(se.bygroup[[m]], "postVar")
+        K <- dim(vars.m)[1]
+        J <- dim(vars.m)[3]
+        names.full <- dimnames(se.bygroup[[m]])
+        se.bygroup[[m]] <- array(NA, c(J, K))
+        for (j in 1:J) {
+            se.bygroup[[m]][j, ] <- sqrt(diag(as.matrix(vars.m[, 
+                , j])))
+        }
+        dimnames(se.bygroup[[m]]) <- list(names.full[[1]], names.full[[2]])
+    }
+    return(se.bygroup)
+}
 ```
 
 ## Simple linear models
@@ -97,6 +137,44 @@ natsap_tidy <- natsap_tidy %>%
            new_ID = as.factor(new_ID),
            sex = as.factor(sex))
 ```
+
+First, let's only consider group differences.
+
+```{r}
+fit_simple1 <- lm(diff ~ 1, data = natsap_tidy)
+fit_simple2 <- lm(diff ~ new_ID - 1, data = natsap_tidy)
+fit_simple3 <- lmer(diff ~ (1|new_ID), data = natsap_tidy)
+
+## Extract coeffiencts and st errors
+int_simple1 <- summary(fit_simple1)$coef[,1]
+int_simple2 <- data.frame(int_simple = summary(fit_simple2)$coef[,1])
+se_int_simple2 <- data.frame(se_int_simple = summary(fit_simple2)$coef[,2])
+int_simple3 <-
+    data.frame(int_simple =
+               unname(fixef(fit_simple3)) + ranef(fit_simple3)$new_ID[,1])
+se_int_simple3 <- 
+    data.frame(se_int_simple =
+               se.ranef(fit_simple3)$new_ID[,1])
+int_simple_a <- 
+    cbind(new_ID = as.factor(dose_tidy$new_ID),
+          model = rep("Unpooled", length(int_simple2)),      
+          int_simple = int_simple2,
+          se_int_simple = se_int_simple2)
+rownames(int_simple_a) <- NULL
+int_simple_b <- 
+    cbind(new_ID = as.factor(dose_tidy$new_ID),
+          model = rep("Partially pooled", length(int_simple3)),
+          int_simple = int_simple3,
+          se_int_simple = se_int_simple3)
+int_simple <- rbind(int_simple_a, int_simple_b)
+limits_simple <- aes(ymax = int_simple + se_int_simple,
+    ymin = int_simple - se_int_simple)
+ggplot(int_simple, aes(x = new_ID, y = int_simple, color = model)) +
+    geom_pointrange(limits_simple, position = position_dodge(width = 0.2)) +
+    geom_hline(yintercept = fixef(fit_simple3))
+
+```
+
 
 Let's look only at `diff` by `sex`. This is what Gelman and Hill call "complete pooling".
 
@@ -127,8 +205,11 @@ ranef(fit_vint)
 Now we add a group-level predictor.
 ```{r}
 ## We need to grab the minutes of individual and group therapy for each individual
+## as well as the value of rtc_vs_obh
 minutes_ind_therapy_full <- minutes_ind_therapy[natsap_tidy$new_ID,]
 minutes_group_therapy_full <- minutes_group_therapy[natsap_tidy$new_ID,]
+rtc_vs_obh_full <- rtc_vs_obh[natsap_tidy$new_ID,]
+
 
 ## The model for individual therapy
 fit_hier_vint_ind <- lmer(diff ~ sex + minutes_ind_therapy_full + (1 | new_ID),
@@ -145,39 +226,19 @@ summary(fit_hier_vint_group)
 coef(fit_hier_vint_group)
 fixef(fit_hier_vint_group)
 ranef(fit_hier_vint_group)
+
+## The model for rtc_vs_obh
+fit_hier_vint_rtc_vs_obh <-
+    lmer(diff ~ sex + rtc_vs_obh_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_rtc_vs_obh)
+coef(fit_hier_vint_rtc_vs_obh)
+fixef(fit_hier_vint_rtc_vs_obh)
+ranef(fit_hier_vint_rtc_vs_obh)
 ```
 
 Let's try to plot something.
 ```{r}
-## Wihtout having to load the arm package, we can still use the handy
-## functions se.fixef and se.ranef
-se.fixef <- function (object) 
-{
-    fcoef.name <- names(fixef(object))
-    corF <- vcov(object)@factors$correlation
-    ses <- corF@sd
-    names(ses) <- fcoef.name
-    return(ses)
-}
-
-se.ranef <- function (object) 
-{
-    se.bygroup <- ranef(object, condVar = TRUE)
-    n.groupings <- length(se.bygroup)
-    for (m in 1:n.groupings) {
-        vars.m <- attr(se.bygroup[[m]], "postVar")
-        K <- dim(vars.m)[1]
-        J <- dim(vars.m)[3]
-        names.full <- dimnames(se.bygroup[[m]])
-        se.bygroup[[m]] <- array(NA, c(J, K))
-        for (j in 1:J) {
-            se.bygroup[[m]][j, ] <- sqrt(diag(as.matrix(vars.m[, 
-                , j])))
-        }
-        dimnames(se.bygroup[[m]]) <- list(names.full[[1]], names.full[[2]])
-    }
-    return(se.bygroup)
-}
 
 ## Extract coefficients for minutes of individual therapy
 int_ind <-coef(fit_hier_vint_ind)$new_ID[,1]
@@ -196,4 +257,26 @@ int_by_group <-
 limits_group <- aes(ymax = int_group + se_int_group, ymin = int_group - se_int_group)
 ggplot(int_by_group, aes(x = minutes_group_therapy, y = int_group)) +
     geom_pointrange(limits_group, position = position_jitter(width = 2))
+
+## Extract coefficients for rtc_vs_obh
+int_rtc_vs_obh <-coef(fit_hier_vint_rtc_vs_obh)$new_ID[,1]
+se_int_rtc_vs_obh <- se.ranef(fit_hier_vint_rtc_vs_obh)$new_ID[,1]
+int_by_rtc_vs_obh <- 
+    data.frame(dose_tidy$new_ID, rtc_vs_obh,int_rtc_vs_obh, se_int_rtc_vs_obh)
+limits_rtc_vs_obh <- aes(ymax = int_rtc_vs_obh + se_int_rtc_vs_obh,
+    ymin = int_rtc_vs_obh - se_int_rtc_vs_obh)
+ggplot(int_by_rtc_vs_obh, aes(x = rtc_vs_obh, y = int_rtc_vs_obh)) +
+    geom_pointrange(limits_rtc_vs_obh, position = position_jitter(width = 0.1))
 ```
+
+This all looks fine, but we perform a check to make sure that errors bars really are correlated with sample size.
+
+```{r}
+## Sample size check
+sample_check <- data.frame(dose_tidy$new_ID, n = dose_tidy$n, rtc_vs_obh,int_rtc_vs_obh, se_int_rtc_vs_obh)
+ggplot(sample_check, aes(x = n, y = int_rtc_vs_obh)) +
+    geom_pointrange(limits_rtc_vs_obh, position = position_jitter(width = 0.1))
+```
+
+
+
