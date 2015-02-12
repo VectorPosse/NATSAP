@@ -1,12 +1,12 @@
 ---
-title: "Building up models"
+title: "Building up models for NATSAP data"
 author: "Sean Raleigh"
 date: "Tuesday, January 27, 2015"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(cache=TRUE)
+# knitr::opts_chunk$set(cache=TRUE)
 ```
 
 ## Introduction
@@ -21,7 +21,7 @@ Code to read and clean the data.
 library(lme4)
 library(rstan)
 library(dplyr)
-library(reshape2)
+library(tidyr)
 library(ggplot2)
 
 ## Import Data
@@ -39,15 +39,21 @@ natsap_tidy <- natsap %>%
            discharge_OQ = DischargeTotalScore) %>%
     mutate(diff = admission_OQ - discharge_OQ)
 
+        
 natsap_tidy <- natsap_tidy[complete.cases(natsap_tidy),]
 
-
-    
 dose_tidy <- dose %>%
-    select(rtc_vs_obh = RTCvsOBH,
+    transmute(RTC_OBH = RTCvsOBH,
            ID = NatsapId,
-           minutes_ind_therapy = Mode.minutes.of.Inidividual.Therapy,
-           minutes_group_therapy = Mode.minutes.of.Group.Therapy)
+           IT = Mode.minutes.of.Inidividual.Therapy,
+           mean_IT = mean(Mode.minutes.of.Inidividual.Therapy),
+           IT_cent = IT - mean_IT,
+           GT = Mode.minutes.of.Group.Therapy,
+           mean_GT = mean(Mode.minutes.of.Group.Therapy),
+           GT_cent = GT - mean_GT,
+           RFT = Mode.minutes..of.Remote.Family.Therapy.per.week,
+           mean_RFT = mean(Mode.minutes..of.Remote.Family.Therapy.per.week),
+           RFT_cent = RFT - mean_RFT)
 
 ## Creates new program IDs incrementing from 1 for loops in Stan
 ## lookup is the intersection of ID from dose_tidy and natsap_tidy
@@ -72,16 +78,30 @@ n_by_program <- natsap_tidy %>%
 
 dose_tidy <- cbind(dose_tidy, n = n_by_program$n)
 
+## Make factor variable and relevel
+
+natsap_tidy <- natsap_tidy %>%
+    mutate(new_ID = as.factor(new_ID),
+           sex = as.factor(sex))
+
+## Recode 0/1 as "male" and "female"
+levels(natsap_tidy$sex)[levels(natsap_tidy$sex) == 0] <- "Male"
+levels(natsap_tidy$sex)[levels(natsap_tidy$sex) == 1] <- "Female"
+
 ## Defines Variables to be passed to Stan
 ## IPred and GPred have a column of 1's representing the constant term
 n_subj <- nrow(natsap_tidy)
 n_prog <- nrow(dose_tidy)
 sex <- select(natsap_tidy, sex)
 ind_pred <- cbind(rep(1, n_subj), sex)
-minutes_ind_therapy <- select(dose_tidy, minutes_ind_therapy)
-minutes_group_therapy <- select(dose_tidy, minutes_group_therapy)
-rtc_vs_obh <- select(dose_tidy, rtc_vs_obh)
-group_pred <- cbind(rep(1, n_prog), minutes_ind_therapy, minutes_group_therapy)
+IT <- select(dose_tidy, IT)
+IT_cent <- select(dose_tidy, IT_cent)
+GT <- select(dose_tidy, GT)
+GT_cent <- select(dose_tidy, GT_cent)
+RFT <- select(dose_tidy, RFT)
+RFT_cent <- select(dose_tidy, RFT_cent)
+RTC_OBH <- select(dose_tidy, RTC_OBH)
+group_pred <- cbind(rep(1, n_prog), IT_cent, GT_cent, RFT_cent, RTC_OBH)
 diff <- natsap_tidy$diff
 ID = select(natsap_tidy, ID)
 
@@ -128,15 +148,6 @@ se.ranef <- function (object)
 ```
 
 ## Simple linear models
-
-We need IDs and sex to be factor variables.
-
-```{r}
-natsap_tidy <- natsap_tidy %>%
-    mutate(ID = as.factor(ID),
-           new_ID = as.factor(new_ID),
-           sex = as.factor(sex))
-```
 
 First, let's only consider group differences.
 
@@ -205,78 +216,394 @@ ranef(fit_vint)
 Now we add a group-level predictor.
 ```{r}
 ## We need to grab the minutes of individual and group therapy for each individual
-## as well as the value of rtc_vs_obh
-minutes_ind_therapy_full <- minutes_ind_therapy[natsap_tidy$new_ID,]
-minutes_group_therapy_full <- minutes_group_therapy[natsap_tidy$new_ID,]
-rtc_vs_obh_full <- rtc_vs_obh[natsap_tidy$new_ID,]
+## as well as the value of RTC_OBH
+IT_full <- IT_cent[natsap_tidy$new_ID,]
+GT_full <- GT_cent[natsap_tidy$new_ID,]
+RFT_full <- RFT_cent[natsap_tidy$new_ID,]
+RTC_OBH_full <- RTC_OBH[natsap_tidy$new_ID,]
 
 
 ## The model for individual therapy
-fit_hier_vint_ind <- lmer(diff ~ sex + minutes_ind_therapy_full + (1 | new_ID),
+fit_hier_vint_IT <- lmer(diff ~ sex + IT_full + (1 | new_ID),
     data = natsap_tidy)
-summary(fit_hier_vint_ind)
-coef(fit_hier_vint_ind)
-fixef(fit_hier_vint_ind)
-ranef(fit_hier_vint_ind)
+summary(fit_hier_vint_IT)
+coef(fit_hier_vint_IT)
+fixef(fit_hier_vint_IT)
+ranef(fit_hier_vint_IT)
 
 ## The model for group therapy
-fit_hier_vint_group <- lmer(diff ~ sex + minutes_group_therapy_full + (1 | new_ID),
+fit_hier_vint_GT <- lmer(diff ~ sex + GT_full + (1 | new_ID),
     data = natsap_tidy)
-summary(fit_hier_vint_group)
-coef(fit_hier_vint_group)
-fixef(fit_hier_vint_group)
-ranef(fit_hier_vint_group)
+summary(fit_hier_vint_GT)
+coef(fit_hier_vint_GT)
+fixef(fit_hier_vint_GT)
+ranef(fit_hier_vint_GT)
 
-## The model for rtc_vs_obh
-fit_hier_vint_rtc_vs_obh <-
-    lmer(diff ~ sex + rtc_vs_obh_full + (1 | new_ID),
+## The model for remote family therapy
+fit_hier_vint_RFT <- lmer(diff ~ sex + RFT_full + (1 | new_ID),
     data = natsap_tidy)
-summary(fit_hier_vint_rtc_vs_obh)
-coef(fit_hier_vint_rtc_vs_obh)
-fixef(fit_hier_vint_rtc_vs_obh)
-ranef(fit_hier_vint_rtc_vs_obh)
+summary(fit_hier_vint_RFT)
+coef(fit_hier_vint_RFT)
+fixef(fit_hier_vint_RFT)
+ranef(fit_hier_vint_RFT)
+
+## The model for RTC_OBH
+fit_hier_vint_RTC_OBH <-
+    lmer(diff ~ sex + RTC_OBH_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_RTC_OBH)
+coef(fit_hier_vint_RTC_OBH)
+fixef(fit_hier_vint_RTC_OBH)
+ranef(fit_hier_vint_RTC_OBH)
 ```
+
+We realize that we need to control not only for `sex`, but also for `RTC_OBH`. There appears to be a bigger difference for females in RTC programs (because of the much higher admission scores).
+
+```{r}
+## The model for individual therapy
+fit_hier_vint_IT2 <- lmer(diff ~ sex + RTC_OBH_full + IT_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_IT2)
+coef(fit_hier_vint_IT2)
+fixef(fit_hier_vint_IT2)
+ranef(fit_hier_vint_IT2)
+
+## The model for group therapy
+fit_hier_vint_GT2 <- lmer(diff ~ sex + RTC_OBH_full + GT_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_GT2)
+coef(fit_hier_vint_GT2)
+fixef(fit_hier_vint_GT2)
+ranef(fit_hier_vint_GT2)
+
+## The model for remote family therapy
+fit_hier_vint_RFT2 <- lmer(diff ~ sex + RTC_OBH_full + RFT_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_RFT2)
+coef(fit_hier_vint_RFT2)
+fixef(fit_hier_vint_RFT2)
+ranef(fit_hier_vint_RFT2)
+```
+
 
 Let's try to plot something.
 ```{r}
 
 ## Extract coefficients for minutes of individual therapy
-int_ind <-coef(fit_hier_vint_ind)$new_ID[,1]
-se_int_ind <- se.ranef(fit_hier_vint_ind)$new_ID[,1]
-int_by_ind <- 
-    data.frame(dose_tidy$new_ID, minutes_ind_therapy,int_ind, se_int_ind)
-limits_ind <- aes(ymax = int_ind + se_int_ind, ymin = int_ind - se_int_ind)
-ggplot(int_by_ind, aes(x = minutes_ind_therapy, y = int_ind)) +
+int_IT <-coef(fit_hier_vint_IT)$new_ID[,1]
+se_int_IT <- se.ranef(fit_hier_vint_IT)$new_ID[,1]
+int_by_IT <- 
+    data.frame(dose_tidy$new_ID, IT, int_IT, se_int_IT)
+limits_ind <- aes(ymax = int_IT + se_int_IT, ymin = int_IT - se_int_IT)
+ggplot(int_by_IT, aes(x = IT, y = int_IT)) +
     geom_pointrange(limits_ind, position = position_jitter(width = 1))
 
 ## Extract coefficients for minutes of group therapy
-int_group <-coef(fit_hier_vint_group)$new_ID[,1]
-se_int_group <- se.ranef(fit_hier_vint_group)$new_ID[,1]
-int_by_group <- 
-    data.frame(dose_tidy$new_ID, minutes_group_therapy,int_group, se_int_group)
-limits_group <- aes(ymax = int_group + se_int_group, ymin = int_group - se_int_group)
-ggplot(int_by_group, aes(x = minutes_group_therapy, y = int_group)) +
+int_GT <-coef(fit_hier_vint_GT)$new_ID[,1]
+se_int_GT <- se.ranef(fit_hier_vint_GT)$new_ID[,1]
+int_by_GT <- 
+    data.frame(dose_tidy$new_ID, GT,int_GT, se_int_GT)
+limits_group <- aes(ymax = int_GT + se_int_GT, ymin = int_GT - se_int_GT)
+ggplot(int_by_GT, aes(x = GT, y = int_GT)) +
     geom_pointrange(limits_group, position = position_jitter(width = 2))
 
-## Extract coefficients for rtc_vs_obh
-int_rtc_vs_obh <-coef(fit_hier_vint_rtc_vs_obh)$new_ID[,1]
-se_int_rtc_vs_obh <- se.ranef(fit_hier_vint_rtc_vs_obh)$new_ID[,1]
-int_by_rtc_vs_obh <- 
-    data.frame(dose_tidy$new_ID, rtc_vs_obh,int_rtc_vs_obh, se_int_rtc_vs_obh)
-limits_rtc_vs_obh <- aes(ymax = int_rtc_vs_obh + se_int_rtc_vs_obh,
-    ymin = int_rtc_vs_obh - se_int_rtc_vs_obh)
-ggplot(int_by_rtc_vs_obh, aes(x = rtc_vs_obh, y = int_rtc_vs_obh)) +
-    geom_pointrange(limits_rtc_vs_obh, position = position_jitter(width = 0.1))
+## Extract coefficients for minutes of remote family therapy
+int_RFT <-coef(fit_hier_vint_RFT)$new_ID[,1]
+se_int_RFT <- se.ranef(fit_hier_vint_RFT)$new_ID[,1]
+int_by_RFT <- 
+    data.frame(dose_tidy$new_ID, RFT,int_RFT, se_int_RFT)
+limits_RFT <- aes(ymax = int_RFT + se_int_RFT, ymin = int_RFT - se_int_RFT)
+ggplot(int_by_RFT, aes(x = RFT, y = int_RFT)) +
+    geom_pointrange(limits_RFT, position = position_jitter(width = 2))
+
+## Extract coefficients for RTC_OBH
+int_RTC_OBH <-coef(fit_hier_vint_RTC_OBH)$new_ID[,1]
+se_int_RTC_OBH <- se.ranef(fit_hier_vint_RTC_OBH)$new_ID[,1]
+int_by_RTC_OBH <- 
+    data.frame(dose_tidy$new_ID, RTC_OBH,int_RTC_OBH, se_int_RTC_OBH)
+limits_RTC_OBH <- aes(ymax = int_RTC_OBH + se_int_RTC_OBH,
+    ymin = int_RTC_OBH - se_int_RTC_OBH)
+ggplot(int_by_RTC_OBH, aes(x = RTC_OBH, y = int_RTC_OBH)) +
+    geom_pointrange(limits_RTC_OBH, position = position_jitter(width = 0.1))
 ```
 
-This all looks fine, but we perform a check to make sure that errors bars really are correlated with sample size.
+Repeat for the models controling for both `sex` and `RTC_OBH`.
+
+```{r}
+
+## Extract coefficients for minutes of individual therapy
+int_IT2 <-coef(fit_hier_vint_IT2)$new_ID[,1]
+se_int_IT2 <- se.ranef(fit_hier_vint_IT2)$new_ID[,1]
+int_by_IT2 <- 
+    data.frame(dose_tidy$new_ID, IT, int_IT2, se_int_IT2)
+limits_ind2 <- aes(ymax = int_IT2 + se_int_IT2, ymin = int_IT2 - se_int_IT2)
+plot_IT2 <- ggplot(int_by_IT2, aes(x = IT, y = int_IT2)) +
+    geom_pointrange(limits_ind2, position = position_jitter(width = 2))
+plot_IT2
+
+## Extract coefficients for minutes of group therapy
+int_GT2 <-coef(fit_hier_vint_GT2)$new_ID[,1]
+se_int_GT2 <- se.ranef(fit_hier_vint_GT2)$new_ID[,1]
+int_by_GT2 <- 
+    data.frame(dose_tidy$new_ID, GT,int_GT2, se_int_GT2)
+limits_group2 <- aes(ymax = int_GT2 + se_int_GT2, ymin = int_GT2 - se_int_GT2)
+plot_GT2 <- ggplot(int_by_GT2, aes(x = GT, y = int_GT2)) +
+    geom_pointrange(limits_group2, position = position_jitter(width = 8))
+plot_GT2
+
+## Extract coefficients for minutes of remote family therapy
+int_RFT2 <-coef(fit_hier_vint_RFT2)$new_ID[,1]
+se_int_RFT2 <- se.ranef(fit_hier_vint_RFT2)$new_ID[,1]
+int_by_RFT2 <- 
+    data.frame(dose_tidy$new_ID, RFT,int_RFT2, se_int_RFT2)
+limits_RFT2 <- aes(ymax = int_RFT2 + se_int_RFT2, ymin = int_RFT2 - se_int_RFT2)
+plot_RFT2 <- ggplot(int_by_RFT2, aes(x = RFT, y = int_RFT2)) +
+    geom_pointrange(limits_RFT2, position = position_jitter(width = 4))
+plot_RFT2
+```
+
+What if we didn't look at `diff`? Since all outcomes seem to be roughly the same, what if we only look at `discharge_OQ`?
+
+```{r}
+## The model for individual therapy
+fit_hier_vint_IT3 <- lmer(discharge_OQ ~ sex + RTC_OBH_full + IT_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_IT3)
+coef(fit_hier_vint_IT3)
+fixef(fit_hier_vint_IT3)
+ranef(fit_hier_vint_IT3)
+
+## The model for group therapy
+fit_hier_vint_GT3 <- lmer(discharge_OQ ~ sex + RTC_OBH_full + GT_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_GT3)
+coef(fit_hier_vint_GT3)
+fixef(fit_hier_vint_GT3)
+ranef(fit_hier_vint_GT3)
+
+## The model for remote family therapy
+fit_hier_vint_RFT3 <- lmer(discharge_OQ ~ sex + RTC_OBH_full + RFT_full + (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_RFT3)
+coef(fit_hier_vint_RFT3)
+fixef(fit_hier_vint_RFT3)
+ranef(fit_hier_vint_RFT3)
+
+## Extract coefficients for minutes of individual therapy
+int_IT3 <-coef(fit_hier_vint_IT3)$new_ID[,1]
+se_int_IT3 <- se.ranef(fit_hier_vint_IT3)$new_ID[,1]
+int_by_IT3 <- 
+    data.frame(dose_tidy$new_ID, IT, int_IT3, se_int_IT3)
+limits_ind3 <- aes(ymax = int_IT3 + se_int_IT3, ymin = int_IT3 - se_int_IT3)
+ggplot(int_by_IT3, aes(x = IT, y = int_IT3)) +
+    geom_pointrange(limits_ind3, position = position_jitter(width = 1))
+
+## Extract coefficients for minutes of group therapy
+int_GT3 <-coef(fit_hier_vint_GT3)$new_ID[,1]
+se_int_GT3 <- se.ranef(fit_hier_vint_GT3)$new_ID[,1]
+int_by_GT3 <- 
+    data.frame(dose_tidy$new_ID, GT,int_GT3, se_int_GT3)
+limits_group3 <- aes(ymax = int_GT3 + se_int_GT3, ymin = int_GT3 - se_int_GT3)
+ggplot(int_by_GT3, aes(x = GT, y = int_GT3)) +
+    geom_pointrange(limits_group3, position = position_jitter(width = 2))
+
+## Extract coefficients for minutes of remote family therapy
+int_RFT3 <-coef(fit_hier_vint_RFT3)$new_ID[,1]
+se_int_RFT3 <- se.ranef(fit_hier_vint_RFT3)$new_ID[,1]
+int_by_RFT3 <- 
+    data.frame(dose_tidy$new_ID, RFT,int_RFT3, se_int_RFT3)
+limits_RFT3 <- aes(ymax = int_RFT3 + se_int_RFT3, ymin = int_RFT3 - se_int_RFT3)
+ggplot(int_by_RFT3, aes(x = RFT, y = int_RFT3)) +
+    geom_pointrange(limits_RFT3, position = position_jitter(width = 2))
+```
+
+# Descriptive Statistics
+
+## Sample sizes
 
 ```{r}
 ## Sample size check
-sample_check <- data.frame(dose_tidy$new_ID, n = dose_tidy$n, rtc_vs_obh,int_rtc_vs_obh, se_int_rtc_vs_obh)
-ggplot(sample_check, aes(x = n, y = int_rtc_vs_obh)) +
-    geom_pointrange(limits_rtc_vs_obh, position = position_jitter(width = 0.1))
+sample_check <- data.frame(new_ID = dose_tidy$new_ID, n = dose_tidy$n,
+                           RTC_OBH,int_RTC_OBH, se_int_RTC_OBH)
+sample_check <- sample_check %>%
+    arrange(RTC_OBH, new_ID)
+sample_check
+
+sample_check_totals <- sample_check %>%
+    group_by(RTC_OBH) %>%
+    summarise(sum(n))
+sample_check_totals
+
+sample_by_sex <- natsap_tidy %>%
+    group_by(new_ID, sex) %>%
+    summarise(n = n())
+prog_type <- RTC_OBH[sample_by_sex$new_ID,]
+sample_by_sex <- sample_by_sex %>%
+    cbind(prog_type) %>%
+    arrange(prog_type, new_ID)
+sample_by_sex
+
+sample_by_sex_totals <- sample_by_sex %>%
+    group_by(prog_type, sex) %>%
+    summarise(sum(n))
+sample_by_sex_totals
+
+
 ```
 
 
+## RTC_vs_OBH OQ
 
+```{r}
+OQ <- cbind(natsap_tidy, RTC_OBH_full)
+OQ_summary <- OQ %>%
+    group_by(RTC_OBH_full, sex) %>%
+    summarize(median(admission_OQ), median(discharge_OQ), median(diff))
+OQ_summary
+
+OQ_adm_dis <- OQ %>%
+    gather(adm_dis, OQ, admission_OQ, discharge_OQ)
+levels(OQ_adm_dis$adm_dis)[levels(OQ_adm_dis$adm_dis) == "admission_OQ"] <- 
+    "Admission OQ"
+levels(OQ_adm_dis$adm_dis)[levels(OQ_adm_dis$adm_dis) == "discharge_OQ"] <- 
+    "Discharge OQ"
+
+plot_OQ_adm_dis <- ggplot(OQ_adm_dis, aes(x = RTC_OBH_full,
+               y = OQ,
+               fill = sex)) +
+    geom_boxplot() +
+    facet_grid(. ~ adm_dis) +
+    xlab("") +
+    scale_fill_discrete(name="Sex") +
+    theme(strip.text.x = element_text(size=16))
+plot_OQ_adm_dis
+
+plot_OQ_diff <- ggplot(OQ, aes(x = RTC_OBH_full, y = diff, fill = sex)) +
+    geom_boxplot() +
+    xlab("") +
+    ylab("OQ difference") +
+    scale_fill_discrete(name="Sex") +
+    theme(axis.title.y = element_text(size=16))
+plot_OQ_diff
+```
+
+That was for only `natsap_tidy`. Does this look different for the whole NATSAP database?
+
+
+```{r}
+OQ2 <- natsap %>%
+    select(ID = NatsapId,
+           sex = GenderNumeric, 
+           admission_OQ = AdmissionTotalScore,
+           discharge_OQ = DischargeTotalScore,
+           RTC_OBH = RTCvsOBH) %>%
+    mutate(diff = admission_OQ - discharge_OQ)
+
+        
+OQ2 <- OQ2[complete.cases(OQ2),]
+
+## Make factor variable and relevel
+
+OQ2 <- OQ2 %>%
+    mutate(sex = as.factor(sex))
+
+## Recode 0/1 as "male" and "female"
+levels(OQ2$sex)[levels(OQ2$sex) == 0] <- "Male"
+levels(OQ2$sex)[levels(OQ2$sex) == 1] <- "Female"
+
+
+OQ_summary2 <- OQ2 %>%
+    group_by(RTC_OBH, sex) %>%
+    summarize(median(admission_OQ), median(discharge_OQ), median(diff))
+OQ_summary2
+
+OQ_adm_dis2 <- OQ2 %>%
+    gather(adm_dis, OQ, admission_OQ, discharge_OQ)
+levels(OQ_adm_dis2$adm_dis)[levels(OQ_adm_dis2$adm_dis) == "admission_OQ"] <- 
+    "Admission OQ"
+levels(OQ_adm_dis2$adm_dis)[levels(OQ_adm_dis2$adm_dis) == "discharge_OQ"] <- 
+    "Discharge OQ"
+
+ggplot(OQ_adm_dis2, aes(x = RTC_OBH,
+               y = OQ,
+               fill = sex)) +
+    geom_boxplot() +
+    facet_grid(. ~ adm_dis) +
+    xlab("") +
+    scale_fill_discrete(name="Sex") +
+    theme(strip.text.x = element_text(size=16))
+
+ggplot(OQ2, aes(x = RTC_OBH, y = diff, fill = sex)) +
+    geom_boxplot() +
+    xlab("") +
+    ylab("OQ difference") +
+    scale_fill_discrete(name="Sex") +
+    theme(axis.title.y = element_text(size=16))
+```
+
+## Dose data
+
+```{r}
+dose_tidy %>%
+    select(RTC_OBH, IT, GT, RFT) %>%
+    arrange(RTC_OBH, IT, GT, RFT)
+```
+
+## Clean up plots for presentation
+
+```{r}
+plot_IT2 <- plot_IT2 +
+    xlab("Minutes of Individual Therapy") +
+    ylab("OQ difference") +
+    theme(axis.title.x = element_text(size=32),
+          axis.text.x  = element_text(size=16)) +
+    theme(axis.title.y = element_text(size=32),
+          axis.text.y  = element_text(size=16)) +
+    scale_x_continuous(breaks = seq(60, 120, 30), minor_breaks = NULL)
+plot_IT2
+
+plot_GT2 <- plot_GT2 +
+    xlab("Minutes of Group Therapy") +
+    ylab("OQ difference") +
+    theme(axis.title.x = element_text(size=32),
+          axis.text.x  = element_text(size=16)) +
+    theme(axis.title.y = element_text(size=32),
+          axis.text.y  = element_text(size=16))
+plot_GT2
+
+plot_RFT2 <- plot_RFT2 +
+    xlab("Minutes of Family Therapy") +
+    ylab("OQ difference") +
+    theme(axis.title.x = element_text(size=32),
+          axis.text.x  = element_text(size=16)) +
+    theme(axis.title.y = element_text(size=32),
+          axis.text.y  = element_text(size=16))
+plot_RFT2
+
+plot_OQ_adm_dis <- ggplot(OQ_adm_dis, aes(x = RTC_OBH_full,
+               y = OQ,
+               fill = sex)) +
+    geom_boxplot() +
+    facet_grid(. ~ adm_dis) +
+    xlab("") +
+    scale_fill_discrete(name="Sex") +
+    theme(strip.text.x = element_text(size=16),
+          axis.text.x = element_text(size=16)) +
+    theme(axis.title.y = element_text(size=32),
+          axis.text.y  = element_text(size=16)) +
+    theme(legend.title = element_text(size=16),
+          legend.text = element_text(size=16))
+plot_OQ_adm_dis
+
+plot_OQ_diff <- ggplot(OQ, aes(x = RTC_OBH_full, y = diff, fill = sex)) +
+    geom_boxplot() +
+    xlab("") +
+    ylab("OQ difference") +
+    scale_fill_discrete(name="Sex") +
+    theme(axis.text.x = element_text(size=16)) +
+    theme(axis.title.y = element_text(size=32),
+          axis.text.y = element_text(size=16)) +
+    theme(legend.title = element_text(size=16),
+          legend.text = element_text(size=16))
+plot_OQ_diff
+```
