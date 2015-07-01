@@ -33,7 +33,7 @@ dose <- dose[!is.na(dose$NatsapId),]
 
 ## Select only wanted variables and create diff
 natsap_tidy <- natsap %>%
-    select(ID = NatsapId,
+    dplyr::select(ID = NatsapId,
            sex = GenderNumeric, 
            admission_OQ = AdmissionTotalScore,
            discharge_OQ = DischargeTotalScore) %>%
@@ -42,23 +42,20 @@ natsap_tidy <- natsap %>%
         
 natsap_tidy <- natsap_tidy[complete.cases(natsap_tidy),]
 
+### FIX THIS ####
+### We're mean centering the data before getting the final list of rows! ####
+
 dose_tidy <- dose %>%
     transmute(RTC_OBH = RTCvsOBH,
            ID = NatsapId,
            IT = Mode.minutes.of.Inidividual.Therapy,
-           mean_IT = mean(Mode.minutes.of.Inidividual.Therapy),
-           IT_cent = IT - mean_IT,
            GT = Mode.minutes.of.Group.Therapy,
-           mean_GT = mean(Mode.minutes.of.Group.Therapy),
-           GT_cent = GT - mean_GT,
-           RFT = Mode.minutes..of.Remote.Family.Therapy.per.week,
-           mean_RFT = mean(Mode.minutes..of.Remote.Family.Therapy.per.week),
-           RFT_cent = RFT - mean_RFT)
+           RFT = Mode.minutes..of.Remote.Family.Therapy.per.week)
 
 ## Creates new program IDs incrementing from 1 for loops in Stan
 ## lookup is the intersection of ID from dose_tidy and natsap_tidy
-natsap_tidy_ID <- select(natsap_tidy, ID)
-dose_tidy_ID <- select(dose_tidy, ID)
+natsap_tidy_ID <- dplyr::select(natsap_tidy, ID)
+dose_tidy_ID <- dplyr::select(dose_tidy, ID)
 lookup <- semi_join(dose_tidy_ID, natsap_tidy_ID)
 lookup <- cbind(lookup, new_ID = 1:length(lookup$ID))
 
@@ -78,6 +75,14 @@ n_by_program <- natsap_tidy %>%
 
 dose_tidy <- cbind(dose_tidy, n = n_by_program$n)
 
+dose_tidy <- dose_tidy %>%
+    mutate(
+           mean_IT = mean(IT),
+           IT_cent = IT - mean_IT,
+           mean_GT = mean(GT),
+           GT_cent = GT - mean_GT,
+           mean_RFT = mean(RFT),
+           RFT_cent = RFT - mean_RFT)
 ## Make factor variable and relevel
 
 natsap_tidy <- natsap_tidy %>%
@@ -92,18 +97,18 @@ levels(natsap_tidy$sex)[levels(natsap_tidy$sex) == 1] <- "Female"
 ## IPred and GPred have a column of 1's representing the constant term
 n_subj <- nrow(natsap_tidy)
 n_prog <- nrow(dose_tidy)
-sex <- select(natsap_tidy, sex)
+sex <- dplyr::select(natsap_tidy, sex)
 ind_pred <- cbind(rep(1, n_subj), sex)
-IT <- select(dose_tidy, IT)
-IT_cent <- select(dose_tidy, IT_cent)
-GT <- select(dose_tidy, GT)
-GT_cent <- select(dose_tidy, GT_cent)
-RFT <- select(dose_tidy, RFT)
-RFT_cent <- select(dose_tidy, RFT_cent)
-RTC_OBH <- select(dose_tidy, RTC_OBH)
+IT <- dplyr::select(dose_tidy, IT)
+IT_cent <- dplyr::select(dose_tidy, IT_cent)
+GT <- dplyr::select(dose_tidy, GT)
+GT_cent <- dplyr::select(dose_tidy, GT_cent)
+RFT <- dplyr::select(dose_tidy, RFT)
+RFT_cent <- dplyr::select(dose_tidy, RFT_cent)
+RTC_OBH <- dplyr::select(dose_tidy, RTC_OBH)
 group_pred <- cbind(rep(1, n_prog), IT_cent, GT_cent, RFT_cent, RTC_OBH)
 diff <- natsap_tidy$diff
-ID = select(natsap_tidy, ID)
+ID = dplyr::select(natsap_tidy, ID)
 
 
 ## Put data in a list for Stan
@@ -138,8 +143,7 @@ se.ranef <- function (object)
         names.full <- dimnames(se.bygroup[[m]])
         se.bygroup[[m]] <- array(NA, c(J, K))
         for (j in 1:J) {
-            se.bygroup[[m]][j, ] <- sqrt(diag(as.matrix(vars.m[, 
-                , j])))
+            se.bygroup[[m]][j, ] <- sqrt(diag(as.matrix(vars.m[, , j])))
         }
         dimnames(se.bygroup[[m]]) <- list(names.full[[1]], names.full[[2]])
     }
@@ -492,7 +496,7 @@ That was for only `natsap_tidy`. Does this look different for the whole NATSAP d
 
 ```{r}
 OQ2 <- natsap %>%
-    select(ID = NatsapId,
+    dplyr::select(ID = NatsapId,
            sex = GenderNumeric, 
            admission_OQ = AdmissionTotalScore,
            discharge_OQ = DischargeTotalScore,
@@ -545,7 +549,7 @@ ggplot(OQ2, aes(x = RTC_OBH, y = diff, fill = sex)) +
 
 ```{r}
 dose_tidy %>%
-    select(RTC_OBH, IT, GT, RFT) %>%
+    dplyr::select(RTC_OBH, IT, GT, RFT) %>%
     arrange(RTC_OBH, IT, GT, RFT)
 ```
 
@@ -607,3 +611,41 @@ plot_OQ_diff <- ggplot(OQ, aes(x = RTC_OBH_full, y = diff, fill = sex)) +
           legend.text = element_text(size=16))
 plot_OQ_diff
 ```
+
+## Plotting intercepts against group regression line
+
+We correct the hierarchical plots: this time, rather than just showing the intercept, we need to add each group's contribution to the variable of interest (IT, FT, RTC.)
+
+```{r}
+## Remove mean-centering for graphic purposes.
+
+IT_full_uncentered <- IT[natsap_tidy$new_ID,]
+fit_hier_vint_IT2_uncentered <- lmer(diff ~ sex + RTC_OBH_full + IT_full_uncentered + 
+                                    (1 | new_ID),
+    data = natsap_tidy)
+summary(fit_hier_vint_IT2_uncentered)
+coef(fit_hier_vint_IT2_uncentered)
+fixef(fit_hier_vint_IT2_uncentered)
+ranef(fit_hier_vint_IT2_uncentered)
+
+## Extract coefficients for minutes of individual therapy.
+## Plot corrected graph. (Earlier graphs failed to adjust the
+## intercept for the group predictor.)
+
+int_IT2_uncentered <- coef(fit_hier_vint_IT2_uncentered)$new_ID[,1]
+se_int_IT2_uncentered <- se.ranef(fit_hier_vint_IT2_uncentered)$new_ID[,1]
+IT_coef_uncentered <- fixef(fit_hier_vint_IT2_uncentered)['IT_full_uncentered']
+int_by_IT2_corrected <- 
+    data.frame(dose_tidy$new_ID, IT = IT$IT, IT_alpha = int_IT2_uncentered + IT_coef_uncentered*IT$IT, se_int_IT2_uncentered)
+limits_ind2_corrected <- aes(ymax = int_IT2_uncentered + IT_coef_uncentered*IT + se_int_IT2_uncentered, ymin = int_IT2_uncentered + IT_coef_uncentered*IT - se_int_IT2_uncentered)
+plot_IT2_corrected <- ggplot(int_by_IT2_corrected, aes(x = IT, y = IT_alpha)) +
+    geom_pointrange(limits_ind2_corrected, position = position_jitter(width = 2))
+## The next command adds a fit line, but this is misleading as 
+## the slope is not significant.
+#plot_IT2_corrected <- plot_IT2_corrected +
+#    geom_abline(intercept = fixef(fit_hier_vint_IT2_uncentered)[1],
+#                slope = fixef(fit_hier_vint_IT2_uncentered)[4])
+plot_IT2_corrected
+```
+
+Go to the `NATSAP_2015` folder for the rest of the corrected analysis.

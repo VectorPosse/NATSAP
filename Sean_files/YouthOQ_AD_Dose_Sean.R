@@ -3,6 +3,9 @@ library(rstan)
 library(dplyr)
 library(ggplot2)
 
+
+#### THIS FILE IS SUPERCEDED BY THE RMD FILE ####
+
 ## Import Data
 natsap <- read.csv("NewNATSAP.csv")
 dose <- read.csv("NATSAPDoseData.csv")
